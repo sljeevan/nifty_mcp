@@ -2,6 +2,7 @@ import os
 import json
 import math
 from typing import Dict, Any, Optional
+from datetime import datetime, timedelta
 from data_provider import DataProvider
 from schema import SpotSetup
 from config import NIFTY_LOT_SIZE, MACRO_STATE_PATH
@@ -66,8 +67,20 @@ class StrikeSelector:
             try:
                 with open(MACRO_STATE_PATH, "r") as f:
                     bias_data = json.load(f)
-                    recommended_rr = bias_data.get("recommended_rr", 3.0)
-                    print(f"[Selector] Loaded Recommended Reward-to-Risk Ratio: {recommended_rr}:1")
+                    updated_at_str = bias_data.get("updated_at")
+                    if updated_at_str:
+                        updated_at = datetime.fromisoformat(updated_at_str)
+                        if updated_at.tzinfo is not None:
+                            updated_at = updated_at.replace(tzinfo=None)
+                        if datetime.now() - updated_at > timedelta(hours=18):
+                            print(f"[Selector] Warning: macro_state.json is stale (>18h, updated at {updated_at_str}). Using default R:R 3.0:1.")
+                            recommended_rr = 3.0
+                        else:
+                            recommended_rr = bias_data.get("recommended_rr", 3.0)
+                            print(f"[Selector] Loaded Recommended Reward-to-Risk Ratio: {recommended_rr}:1")
+                    else:
+                        recommended_rr = bias_data.get("recommended_rr", 3.0)
+                        print(f"[Selector] Loaded Recommended Reward-to-Risk Ratio: {recommended_rr}:1")
             except Exception as e:
                 print(f"[Selector] Warning: Failed to load recommended R:R ratio: {e}")
 

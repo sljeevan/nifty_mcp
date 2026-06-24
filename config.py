@@ -25,4 +25,13 @@ SIMULATION_TICK_INTERVAL_SEC = 1.0  # Time between ticks in paper trading loop
 HUMAN_IN_THE_LOOP = False
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
-INDSTOCKS_TOKEN = os.environ.get("INDSTOCKS_TOKEN", "eyJhbGciOiJIUzUxMiIsInR5cCI6IkpXVCJ9.eyJjbGllbnRJRCI6IjdON0lPIiwiZXhwIjoxNzgxMTQxNDAwLCJpYXQiOjE3ODEwODk4MDMsImlzcyI6ImluZG1vbmV5IiwicGFydG5lcklEIjoxMDQ5NiwidG9rZW5JRCI6Mjc0NjZ9.GPfqdj-JlTOxOPB7-PySNKJTvwVP8jzyQirvCrBo6iXMiOMWKw3ZDeOSJgPVal_JbJYgfSaxTEt7GKCsqHGoNw")
+INDSTOCKS_TOKEN = os.environ.get("INDSTOCKS_TOKEN", "")
+
+# Shared file paths
+INSTRUMENTS_CSV_PATH = os.environ.get("INSTRUMENTS_CSV_PATH", os.path.join(BASE_DIR, "scratch", "instruments_fno.csv"))
+MODEL_PATH = os.environ.get("MODEL_PATH", os.path.join(BASE_DIR, "scratch", "dual_sweep_rf.pkl"))
+
+# Advanced Agent configurations
+BOS_BREAKOUT_WINDOW = 3       # Break of Structure breakout window (in bars)
+CANDLE_DURATION_SEC = 300     # Candle accumulation period in live mode (5 minutes)
+

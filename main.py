@@ -2,7 +2,7 @@ import time
 import argparse
 from datetime import datetime
 from core_orchestrator import NiftyTradingSystem
-from config import BASE_CAPITAL, NIFTY_SYMBOL, HUMAN_IN_THE_LOOP
+from config import BASE_CAPITAL, NIFTY_SYMBOL, HUMAN_IN_THE_LOOP, INDSTOCKS_TOKEN
 import db
 
 def run_simulation():
@@ -83,6 +83,9 @@ def run_live():
     print("\n" + "=" * 60)
     print("🟢 RUNNING NIFTY OPTIONS TRADER - LIVE FEED MODE 🟢")
     print("=" * 60)
+    if not INDSTOCKS_TOKEN:
+        raise ValueError("[Config Error] INDSTOCKS_TOKEN is missing or empty. Live trading cannot proceed without a valid token. Please check your environment configuration or .env file.")
+        
     print("Subscribing to Nifty 50 live feed...")
     
     system = NiftyTradingSystem(human_in_the_loop=HUMAN_IN_THE_LOOP, base_capital=BASE_CAPITAL)

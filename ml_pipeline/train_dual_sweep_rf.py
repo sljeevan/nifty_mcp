@@ -318,7 +318,8 @@ def train_and_save():
     model.fit(X, y)
     
     # Save the trained model to scratch
-    model_path = "/home/mcpuser/MCP/nifty-options-trader/scratch/dual_sweep_rf.pkl"
+    BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    model_path = os.path.join(BASE_DIR, "scratch", "dual_sweep_rf.pkl")
     with open(model_path, "wb") as f:
         pickle.dump(model, f)
         

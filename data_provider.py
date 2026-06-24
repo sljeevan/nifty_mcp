@@ -13,18 +13,24 @@ from typing import Dict, Any, List, Optional
 from config import NIFTY_SYMBOL, INDSTOCKS_TOKEN
 
 # Path configuration for tradingview-mcp services
-sys.path.append("/home/mcpuser/MCP/tradingview-mcp-india/src")
+PARENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+sys.path.append(os.path.join(PARENT_DIR, "tradingview-mcp-india", "src"))
 from tradingview_mcp.core.services.yahoo_finance_service import get_price
+
+from config import NIFTY_SYMBOL, INDSTOCKS_TOKEN, INSTRUMENTS_CSV_PATH
 
 class DataProvider:
     def __init__(self):
         self._last_spot_price = 23200.0  # Safe default
         self.token = INDSTOCKS_TOKEN
         self.headers = {"Authorization": self.token}
-        self.cache_path = "/home/mcpuser/MCP/nifty-options-trader/scratch/instruments_fno.csv"
+        self.cache_path = INSTRUMENTS_CSV_PATH
         self._instruments_cache = None
         self._cached_daily_ema200 = None
         self._ema_cache_date = None
+        self._cached_vix = None
+        self._vix_cache_time = None
+
 
         # WebSocket live streaming state
         self.live_prices = {}
@@ -238,11 +244,11 @@ class DataProvider:
         atm_strike = round(spot_price / 50.0) * 50
         target_strikes = [atm_strike + i * 50 for i in range(-5, 6)]
 
-        # Calculate the next Tuesday expiry date
+        # Calculate the next Thursday expiry date
         today = date.today()
-        days_ahead = (1 - today.weekday()) % 7
+        days_ahead = (3 - today.weekday()) % 7
         expiry = today + timedelta(days=days_ahead)
-        expiry_date_prefix = expiry.strftime("%m/%d/%Y")  # e.g. "06/16/2026"
+        expiry_date_prefix = expiry.strftime("%m/%d/%Y")  # e.g. "06/18/2026"
 
         # Filter active contracts close to ATM
         filtered = []
@@ -308,10 +314,10 @@ class DataProvider:
                     if r.status_code == 200:
                         rest_data = r.json().get("data", {})
                         for k, v in rest_data.items():
-                            live_quotes[k] = v
-                            if "live_price" in v:
-                                with self.ws_lock:
-                                    self.live_prices[k] = float(v["live_price"])
+                             live_quotes[k] = v
+                             if "live_price" in v:
+                                 with self.ws_lock:
+                                     self.live_prices[k] = float(v["live_price"])
                     else:
                         print(f"[Warning] Bulk quote query fallback failed with status: {r.status_code}")
                 except Exception as e:
@@ -328,11 +334,12 @@ class DataProvider:
             if not is_sim and code in live_quotes:
                 premium = live_quotes[code].get("live_price")
                 
+            iv_val = self.get_india_vix()
             if premium is None:
                 # Fallback to simulated premium (default in sim mode)
-                premium = self._calculate_premium(spot_price, strike, option_type)
+                premium = self._calculate_premium(spot_price, strike, option_type, days_to_expiry=float(days_ahead), iv=iv_val)
             
-            delta = self._calculate_delta(spot_price, strike, option_type)
+            delta = self._calculate_delta(spot_price, strike, option_type, days_to_expiry=float(days_ahead), iv=iv_val)
             
             chain.append({
                 "strike_symbol": code,  # We use NFO_{SECURITY_ID} as symbol
@@ -353,13 +360,12 @@ class DataProvider:
                 return contract
         return None
 
-    def _calculate_delta(self, spot: float, strike: int, option_type: str) -> float:
+    def _calculate_delta(self, spot: float, strike: int, option_type: str, days_to_expiry: float = 7.0, iv: float = 0.15) -> float:
         """Approximate option delta using normal distribution simulation."""
         try:
-            # Simplified d1 calculation (implied volatility assumed 15%, 7 days to expiry)
-            iv = 0.15
-            days_to_expiry = 7
-            t = days_to_expiry / 365.0
+            # Use a floor of 0.5 days to avoid division by zero on expiry day
+            days = max(0.5, days_to_expiry)
+            t = days / 365.0
             
             d1 = (math.log(spot / strike) + (0.5 * iv ** 2) * t) / (iv * math.sqrt(t))
             
@@ -377,9 +383,10 @@ class DataProvider:
             else:
                 return -0.5 if spot <= strike else -0.3
 
-    def _calculate_premium(self, spot: float, strike: int, option_type: str) -> float:
+    def _calculate_premium(self, spot: float, strike: int, option_type: str, days_to_expiry: float = 7.0, iv: float = 0.15) -> float:
         """Simulate realistic option premium with intrinsic and extrinsic values."""
-        extrinsic = 100.0  # Base extrinsic value
+        # Scale extrinsic value by square root of time remaining and dynamic IV
+        extrinsic = 100.0 * (iv / 0.15) * math.sqrt(max(0.5, days_to_expiry) / 7.0)
         distance = abs(spot - strike)
         
         # Extrinsic decays as it moves out-of-the-money
@@ -463,4 +470,60 @@ class DataProvider:
         except Exception as e:
             print(f"[DataProvider] Error fetching Nifty prev day levels: {e}")
         return None
+
+    def get_india_vix(self) -> float:
+        """Fetch real-time India VIX from Yahoo Finance to use as IV with caching."""
+        now = datetime.now()
+        if self._cached_vix is not None and self._vix_cache_time is not None:
+            if now - self._vix_cache_time < timedelta(minutes=15):
+                return self._cached_vix
+        try:
+            from tradingview_mcp.core.services.yahoo_finance_service import get_price
+            quote = get_price("^INDIAVIX")
+            if quote and "price" in quote and quote["price"] is not None:
+                vix = float(quote["price"]) / 100.0
+                self._cached_vix = vix
+                self._vix_cache_time = now
+                print(f"[DataProvider] Dynamic IV updated from India VIX: {vix * 100.0:.2f}%")
+                return vix
+        except Exception as e:
+            print(f"[DataProvider] Error fetching India VIX: {e}")
+        return 0.15  # Fallback 15% IV
+
+    def get_historical_5m_candles(self, limit: int = 100) -> List[Dict[str, Any]]:
+        """Fetch historical 5-minute candles for ^NSEI from Yahoo Finance."""
+        try:
+            import urllib.request
+            import json
+            from tradingview_mcp.core.services.proxy_manager import build_opener_with_proxy
+            
+            url = f"https://query1.finance.yahoo.com/v8/finance/chart/{NIFTY_SYMBOL}?interval=5m&range=5d"
+            req = urllib.request.Request(url, headers={"User-Agent": "tradingview-mcp/0.5.0"})
+            opener = build_opener_with_proxy("tradingview-mcp/0.5.0")
+            
+            with opener.open(req, timeout=12) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+                result = data["chart"]["result"][0]
+                quotes = result["indicators"]["quote"][0]
+                highs = quotes["high"]
+                lows = quotes["low"]
+                closes = quotes["close"]
+                opens = quotes["open"]
+                timestamps = result["timestamp"]
+                
+                candles = []
+                for i in range(len(timestamps)):
+                    if (opens[i] is not None and highs[i] is not None and 
+                        lows[i] is not None and closes[i] is not None):
+                        candles.append({
+                            "open": float(opens[i]),
+                            "high": float(highs[i]),
+                            "low": float(lows[i]),
+                            "close": float(closes[i]),
+                            "timestamp": datetime.fromtimestamp(timestamps[i])
+                        })
+                return candles[-limit:]
+        except Exception as e:
+            print(f"[DataProvider] Error fetching historical 5m candles: {e}")
+            return []
 

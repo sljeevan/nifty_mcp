@@ -26,15 +26,20 @@ class MacroSentinel:
         try:
             from tradingview_mcp.core.services.news_service import fetch_news
             from tradingview_mcp.core.services.sentiment_service import analyze_sentiment
+            has_services = True
         except ImportError as e:
-            print(f"[Sentinel] Error importing news/sentiment services: {e}")
-            sys.exit(1)
+            print(f"[Sentinel] Warning: Error importing news/sentiment services ({e}). Using mock/fallback news & sentiment.")
+            has_services = False
             
-        print("[Sentinel] Fetching live financial news feeds...")
-        news_data = fetch_news(symbol="Nifty", category="india", limit=10)
-        
-        print("[Sentinel] Analyzing Reddit sentiment for Nifty...")
-        reddit_data = analyze_sentiment(symbol="Nifty", category="india", limit=20)
+        if has_services:
+            print("[Sentinel] Fetching live financial news feeds...")
+            news_data = fetch_news(symbol="Nifty", category="india", limit=10)
+            
+            print("[Sentinel] Analyzing Reddit sentiment for Nifty...")
+            reddit_data = analyze_sentiment(symbol="Nifty", category="india", limit=20)
+        else:
+            news_data = []
+            reddit_data = {"sentiment_score": 0.0, "sentiment_label": "Neutral"}
         
         print("[Sentinel] Querying Nifty spot index prices...")
         try:

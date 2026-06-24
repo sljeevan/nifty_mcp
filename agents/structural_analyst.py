@@ -4,7 +4,7 @@ import numpy as np
 from typing import List, Dict, Optional, Tuple
 from datetime import datetime
 from schema import SpotSetup
-from config import MACRO_STATE_PATH
+from config import MACRO_STATE_PATH, MODEL_PATH, BOS_BREAKOUT_WINDOW
 
 class StructuralAnalyst:
     def __init__(self, swing_window: int = 2, data_provider = None):
@@ -21,17 +21,22 @@ class StructuralAnalyst:
         self.recent_swing_low: Optional[float] = None
         self.recent_swing_high: Optional[float] = None
         
+        # Breakout window parameter
+        self.breakout_window = BOS_BREAKOUT_WINDOW
+        
         # Bullish (CE) setup tracking
         self.bull_cond_a = False
         self.bull_trigger_high: Optional[float] = None
         self.bull_trigger_low: Optional[float] = None
         self.bull_trigger_found = False
+        self.bull_bars_since_trigger = 0
         
         # Bearish (PE) setup tracking
         self.bear_cond_a = False
         self.bear_trigger_high: Optional[float] = None
         self.bear_trigger_low: Optional[float] = None
         self.bear_trigger_found = False
+        self.bear_bars_since_trigger = 0
         
         # Daily state tracking
         self.day_open: Optional[float] = None
@@ -39,7 +44,7 @@ class StructuralAnalyst:
         
         # Load the optimized ML model
         self.model = None
-        self.model_path = "/home/mcpuser/MCP/nifty-options-trader/scratch/dual_sweep_rf.pkl"
+        self.model_path = MODEL_PATH
         if os.path.exists(self.model_path):
             try:
                 with open(self.model_path, "rb") as f:
@@ -82,58 +87,79 @@ class StructuralAnalyst:
         return self._scan_structure()
 
     def _calculate_indicators(self):
-        """Calculate technical indicators for the latest candle in self.price_history."""
-        if len(self.price_history) < 2:
+        """Calculate technical indicators incrementally for the latest candle."""
+        n = len(self.price_history)
+        if n < 2:
             return
             
-        # 1. Calculate EMA 50
-        closes = [c["close"] for c in self.price_history]
-        if len(closes) >= 50:
-            ema_multiplier = 2 / (50 + 1)
-            ema = sum(closes[:50]) / 50  # Start with SMA
-            for c_val in closes[50:]:
-                ema = (c_val - ema) * ema_multiplier + ema
-            self.price_history[-1]["ema_50"] = ema
+        current = self.price_history[-1]
+        previous = self.price_history[-2]
+        
+        close = current["close"]
+        high = current["high"]
+        low = current["low"]
+        prev_close = previous["close"]
+        
+        # 1. EMA 50
+        if n < 50:
+            current["ema_50"] = close
+        elif n == 50:
+            closes = [c["close"] for c in self.price_history]
+            current["ema_50"] = sum(closes) / 50
         else:
-            self.price_history[-1]["ema_50"] = closes[-1]
-
-        # 2. Calculate RSI 14
-        if len(self.price_history) >= 15:
-            deltas = [self.price_history[i]["close"] - self.price_history[i-1]["close"] for i in range(1, len(self.price_history))]
+            prev_ema = previous.get("ema_50", prev_close)
+            ema_multiplier = 2 / (50 + 1)
+            current["ema_50"] = (close - prev_ema) * ema_multiplier + prev_ema
+            
+        # 2. RSI 14
+        if n < 15:
+            current["rsi_14"] = 50.0
+            current["avg_gain_14"] = 0.0
+            current["avg_loss_14"] = 0.0
+        elif n == 15:
+            closes = [c["close"] for c in self.price_history]
+            deltas = [closes[i] - closes[i-1] for i in range(1, len(closes))]
             gains = [d if d > 0 else 0.0 for d in deltas]
             losses = [-d if d < 0 else 0.0 for d in deltas]
-            
-            avg_gain = sum(gains[:14]) / 14
-            avg_loss = sum(losses[:14]) / 14
-            
-            for i in range(14, len(deltas)):
-                avg_gain = (avg_gain * 13 + gains[i]) / 14
-                avg_loss = (avg_loss * 13 + losses[i]) / 14
-                
+            avg_gain = sum(gains) / 14
+            avg_loss = sum(losses) / 14
+            current["avg_gain_14"] = avg_gain
+            current["avg_loss_14"] = avg_loss
             rs = avg_gain / avg_loss if avg_loss > 0 else 0
-            rsi = 100 - (100 / (1 + rs))
-            self.price_history[-1]["rsi_14"] = rsi
+            current["rsi_14"] = 100 - (100 / (1 + rs)) if avg_loss > 0 else 100.0
         else:
-            self.price_history[-1]["rsi_14"] = 50.0
-
-        # 3. Calculate ATR 14
-        if len(self.price_history) >= 15:
-            tr = []
+            prev_avg_gain = previous.get("avg_gain_14", 0.0)
+            prev_avg_loss = previous.get("avg_loss_14", 0.0)
+            delta = close - prev_close
+            gain = delta if delta > 0 else 0.0
+            loss = -delta if delta < 0 else 0.0
+            
+            avg_gain = (prev_avg_gain * 13 + gain) / 14
+            avg_loss = (prev_avg_loss * 13 + loss) / 14
+            current["avg_gain_14"] = avg_gain
+            current["avg_loss_14"] = avg_loss
+            rs = avg_gain / avg_loss if avg_loss > 0 else 0
+            current["rsi_14"] = 100 - (100 / (1 + rs)) if avg_loss > 0 else 100.0
+            
+        # 3. ATR 14
+        current_tr = max(high - low, abs(high - prev_close), abs(low - prev_close))
+        if n < 15:
+            current["atr_14"] = high - low
+        elif n == 15:
+            tr_list = []
             for i in range(len(self.price_history)):
                 if i == 0:
-                    tr.append(self.price_history[0]["high"] - self.price_history[0]["low"])
+                    tr_list.append(self.price_history[0]["high"] - self.price_history[0]["low"])
                 else:
-                    tr.append(max(
+                    tr_list.append(max(
                         self.price_history[i]["high"] - self.price_history[i]["low"],
                         abs(self.price_history[i]["high"] - self.price_history[i-1]["close"]),
                         abs(self.price_history[i]["low"] - self.price_history[i-1]["close"])
                     ))
-            atr = sum(tr[:14]) / 14
-            for i in range(14, len(tr)):
-                atr = (atr * 13 + tr[i]) / 14
-            self.price_history[-1]["atr_14"] = atr
+            current["atr_14"] = sum(tr_list[:14]) / 14
         else:
-            self.price_history[-1]["atr_14"] = self.price_history[-1]["high"] - self.price_history[-1]["low"]
+            prev_atr = previous.get("atr_14", previous["high"] - previous["low"])
+            current["atr_14"] = (prev_atr * 13 + current_tr) / 14
 
     def _scan_structure(self) -> Optional[SpotSetup]:
         """
@@ -176,7 +202,10 @@ class StructuralAnalyst:
             "spread": high - low
         }
         
-        setup = None
+        setup_triggered = False
+        setup_price = 0.0
+        invalidation_price = 0.0
+        setup_type = ""
         
         # 1. Bullish (CE) Sweep Scan
         if not self.bull_cond_a:
@@ -190,28 +219,30 @@ class StructuralAnalyst:
             self.bull_trigger_low = low
             self.bull_trigger_found = True
             self.bull_cond_a = False
+            self.bull_bars_since_trigger = 0
             print(f"[Analyst] Bullish Trigger Candle found! High: {high:.2f}, Low: {low:.2f}")
             
         elif self.bull_trigger_found and self.bull_trigger_high is not None:
+            self.bull_bars_since_trigger += 1
             if high > self.bull_trigger_high:
                 setup_price = high if open_val > self.bull_trigger_high else self.bull_trigger_high
-                setup = SpotSetup(
-                    spot_price=setup_price,
-                    invalidation_price=self.bull_trigger_low,
-                    setup_type="BULLISH_BOS"
-                )
-                print(f"[Analyst] Bullish BOS Triggered at {setup.spot_price:.2f}. Invalidation Stop: {setup.invalidation_price:.2f}")
+                invalidation_price = self.bull_trigger_low
+                setup_type = "BULLISH_BOS"
+                setup_triggered = True
                 
                 # Reset flags
                 self.bull_trigger_high = None
                 self.bull_trigger_low = None
                 self.bull_trigger_found = False
-            else:
-                # One bar breakout window only (reset if no immediate break)
+                self.bull_bars_since_trigger = 0
+            elif self.bull_bars_since_trigger >= self.breakout_window:
+                # Reset if window expired
+                print(f"[Analyst] Bullish breakout window expired ({self.breakout_window} bars). Resetting trigger.")
                 self.bull_trigger_high = None
                 self.bull_trigger_low = None
                 self.bull_trigger_found = False
-
+                self.bull_bars_since_trigger = 0
+                
         # 2. Bearish (PE) Sweep Scan
         if not self.bear_cond_a:
             if high > prev_high:
@@ -224,30 +255,33 @@ class StructuralAnalyst:
             self.bear_trigger_low = low
             self.bear_trigger_found = True
             self.bear_cond_a = False
+            self.bear_bars_since_trigger = 0
             print(f"[Analyst] Bearish Trigger Candle found! High: {high:.2f}, Low: {low:.2f}")
             
         elif self.bear_trigger_found and self.bear_trigger_low is not None:
+            self.bear_bars_since_trigger += 1
             if low < self.bear_trigger_low:
                 setup_price = low if open_val < self.bear_trigger_low else self.bear_trigger_low
-                setup = SpotSetup(
-                    spot_price=setup_price,
-                    invalidation_price=self.bear_trigger_high,
-                    setup_type="BEARISH_BOS"
-                )
-                print(f"[Analyst] Bearish BOS Triggered at {setup.spot_price:.2f}. Invalidation Stop: {setup.invalidation_price:.2f}")
+                invalidation_price = self.bear_trigger_high
+                setup_type = "BEARISH_BOS"
+                setup_triggered = True
                 
                 # Reset flags
                 self.bear_trigger_high = None
                 self.bear_trigger_low = None
                 self.bear_trigger_found = False
-            else:
+                self.bear_bars_since_trigger = 0
+            elif self.bear_bars_since_trigger >= self.breakout_window:
+                # Reset if window expired
+                print(f"[Analyst] Bearish breakout window expired ({self.breakout_window} bars). Resetting trigger.")
                 self.bear_trigger_high = None
                 self.bear_trigger_low = None
                 self.bear_trigger_found = False
+                self.bear_bars_since_trigger = 0
                 
         # If setup is triggered, run ML validation
-        if setup:
-            is_ce_val = 1 if setup.setup_type == "BULLISH_BOS" else 0
+        if setup_triggered:
+            is_ce_val = 1 if setup_type == "BULLISH_BOS" else 0
             feature_vector = [features["rsi"], features["atr"], features["ema_dist"], features["intraday_ret"], features["spread"], is_ce_val]
             
             if self.model:
@@ -259,17 +293,22 @@ class StructuralAnalyst:
             else:
                 prob = 0.55
                 
-            setup.prob = prob
-            
             if prob > 0.54:
-                setup.confidence_level = "High Confidence"
+                confidence_level = "High Confidence"
             elif prob >= 0.51:
-                setup.confidence_level = "Moderate Confidence"
+                confidence_level = "Moderate Confidence"
             else:
-                setup.confidence_level = "Filtered"
+                confidence_level = "Filtered"
                 print(f"[Analyst] Setup blocked by Random Forest model (Win Prob: {prob:.2%}).")
                 return None
                 
+            setup = SpotSetup(
+                spot_price=setup_price,
+                invalidation_price=invalidation_price,
+                setup_type=setup_type,
+                prob=prob,
+                confidence_level=confidence_level
+            )
             print(f"[Analyst] Setup passed ML Filter with probability: {prob:.2%} ({setup.confidence_level})")
             return setup
             

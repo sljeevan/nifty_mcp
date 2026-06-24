@@ -1,8 +1,8 @@
 {
-    "bias": "BULLISH",
-    "score": 0.4,
-    "confidence": 0.75,
-    "recommended_rr": 3.0,
-    "reasoning": "The Nifty 50 shows a bullish sentiment supported by a series of gains over consecutive days and a notable decline in volatility, which indicates favorable trading conditions. Despite a neutral mood on Reddit, the overall market trajectory is positive.",
-    "updated_at": "2026-06-17T09:35:17.720935"
+    "bias": "CHOPPY",
+    "score": 0.0,
+    "confidence": 0.5,
+    "recommended_rr": 2.0,
+    "reasoning": "The market sentiment is neutral according to Reddit discussions, and the news indicates a mix of gains and volatility in the Nifty 50, with recent sell-offs and uncertain conditions stemming from global signals. As a result, the market appears to be in a choppy state with no clear bullish or bearish bias.",
+    "updated_at": "2026-06-24T09:25:32.088797"
 }
