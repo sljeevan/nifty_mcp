@@ -1,6 +1,7 @@
 from typing import Dict, Any, Tuple, Optional
 from schema import NiftyTradeState
 from pydantic import ValidationError
+from config import NIFTY_LOT_SIZE
 import db
 
 class RiskGuardrail:
@@ -42,7 +43,7 @@ class RiskGuardrail:
                     entry_premium=raw_trade_params.get("entry_premium", 0.01),
                     stop_loss_premium=raw_trade_params.get("stop_loss_premium", 0.01),
                     target_premium=raw_trade_params.get("target_premium", 0.01),
-                    lot_size=raw_trade_params.get("lot_size", 65),
+                    lot_size=raw_trade_params.get("lot_size", NIFTY_LOT_SIZE),
                     base_capital=self.base_capital
                 )
                 db.log_trade_attempt(db_state, "REJECTED", combined_error)

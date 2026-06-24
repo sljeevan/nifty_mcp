@@ -8,6 +8,8 @@ from datetime import datetime
 
 # Set paths
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+sys.path.insert(0, BASE_DIR)
+from config import NIFTY_LOT_SIZE
 
 class NiftyTradingEnv(gym.Env):
     """
@@ -15,7 +17,7 @@ class NiftyTradingEnv(gym.Env):
     """
     metadata = {'render_modes': ['human']}
 
-    def __init__(self, csv_path: str = None, capital: float = 500000.0, lot_size: int = 65):
+    def __init__(self, csv_path: str = None, capital: float = 500000.0, lot_size: int = NIFTY_LOT_SIZE):
         super(NiftyTradingEnv, self).__init__()
         
         self.capital = capital

@@ -10,7 +10,8 @@ MACRO_STATE_PATH = os.path.join(BASE_DIR, "macro_state.json")
 
 # Trading parameters
 NIFTY_SYMBOL = "^NSEI"  # Nifty 50 spot index on Yahoo Finance
-NIFTY_LOT_SIZE = 65    # Nifty 50 lot size for 2026
+NIFTY_LOT_SIZE = int(os.environ.get("NIFTY_LOT_SIZE", "75"))    # Nifty 50 lot size
+EXPIRY_DAY_OF_WEEK = int(os.environ.get("EXPIRY_DAY_OF_WEEK", "1"))  # Weekday index for weekly options expiry (0=Mon, 1=Tue, 2=Wed, 3=Thu, etc.)
 
 # Risk configuration
 BASE_CAPITAL = 500000.0  # Base capital in INR (default: 5 Lakhs)

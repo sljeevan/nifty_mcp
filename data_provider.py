@@ -17,7 +17,7 @@ PARENT_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 sys.path.append(os.path.join(PARENT_DIR, "tradingview-mcp-india", "src"))
 from tradingview_mcp.core.services.yahoo_finance_service import get_price
 
-from config import NIFTY_SYMBOL, INDSTOCKS_TOKEN, INSTRUMENTS_CSV_PATH
+from config import NIFTY_SYMBOL, INDSTOCKS_TOKEN, INSTRUMENTS_CSV_PATH, EXPIRY_DAY_OF_WEEK
 
 class DataProvider:
     def __init__(self):
@@ -244,9 +244,9 @@ class DataProvider:
         atm_strike = round(spot_price / 50.0) * 50
         target_strikes = [atm_strike + i * 50 for i in range(-5, 6)]
 
-        # Calculate the next Thursday expiry date
+        # Calculate the next expiry date based on EXPIRY_DAY_OF_WEEK
         today = date.today()
-        days_ahead = (3 - today.weekday()) % 7
+        days_ahead = (EXPIRY_DAY_OF_WEEK - today.weekday()) % 7
         expiry = today + timedelta(days=days_ahead)
         expiry_date_prefix = expiry.strftime("%m/%d/%Y")  # e.g. "06/18/2026"
 
